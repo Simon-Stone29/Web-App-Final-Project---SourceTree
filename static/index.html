@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Citation Tree Explorer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  /* ── reset & base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0d0f14;
+    --surface:  #161a23;
+    --border:   #252a36;
+    --accent:   #4f8ef7;
+    --accent2:  #a78bfa;
+    --gold:     #f0b429;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --danger:   #f87171;
+    --success:  #34d399;
+    --node-r:   7;
+    --panel-w:  340px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Courier New', monospace;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── header ── */
+  header {
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    font-size: 14px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    flex-wrap: wrap;
+  }
+
+  input#doi-input {
+    flex: 1;
+    min-width: 220px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 12px;
+    font-family: inherit;
+    font-size: 12px;
+    outline: none;
+    transition: border .2s;
+  }
+  input#doi-input:focus { border-color: var(--accent); }
+  input#doi-input::placeholder { color: var(--muted); }
+
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  input[type=range] {
+    accent-color: var(--accent);
+    width: 80px;
+  }
+  .ctrl-val {
+    color: var(--text);
+    font-weight: bold;
+    min-width: 12px;
+    text-align: center;
+  }
+
+  button#search-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 7px 18px;
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: .06em;
+    cursor: pointer;
+    transition: opacity .2s;
+    flex-shrink: 0;
+  }
+  button#search-btn:hover { opacity: .85; }
+  button#search-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* ── main layout ── */
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── tree pane ── */
+  #tree-pane {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #tree-svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ── rank panel ── */
+  #rank-panel {
+    width: var(--panel-w);
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .panel-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .panel-header span { color: var(--text); }
+
+  #rank-list {
+    overflow-y: auto;
+    flex: 1;
+    padding: 8px 0;
+  }
+
+  .rank-item {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .rank-item:hover { background: rgba(79,142,247,.07); }
+  .rank-item.active { background: rgba(79,142,247,.13); }
+
+  .rank-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 3px;
+  }
+
+  .rank-num {
+    font-size: 10px;
+    color: var(--muted);
+    min-width: 18px;
+    text-align: right;
+  }
+
+  .rank-score-bar {
+    height: 3px;
+    background: var(--border);
+    flex: 1;
+    position: relative;
+    border-radius: 2px;
+  }
+  .rank-score-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent);
+    transition: width .4s;
+  }
+  .rank-score-val {
+    font-size: 10px;
+    color: var(--accent);
+    min-width: 36px;
+    text-align: right;
+  }
+
+  .rank-title {
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .rank-meta {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  /* ── tooltip ── */
+  #tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    font-size: 11px;
+    max-width: 300px;
+    line-height: 1.5;
+    z-index: 999;
+    display: none;
+    box-shadow: 0 4px 20px rgba(0,0,0,.5);
+  }
+  #tooltip strong { color: var(--accent); display: block; margin-bottom: 4px; font-size: 12px; }
+  #tooltip .tt-meta { color: var(--muted); }
+
+  /* ── status bar ── */
+  #status {
+    padding: 6px 16px;
+    font-size: 11px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    display: flex;
+    gap: 20px;
+    flex-shrink: 0;
+  }
+  #status .s-ok  { color: var(--success); }
+  #status .s-err { color: var(--danger); }
+  #status .s-info{ color: var(--accent); }
+
+  /* ── D3 styles ── */
+  .link { fill: none; stroke: var(--border); stroke-width: 1.2px; }
+  .node circle {
+    stroke-width: 1.5px;
+    cursor: pointer;
+    transition: r .2s;
+  }
+  .node circle:hover { stroke: var(--accent) !important; }
+  .node text {
+    fill: var(--text);
+    font-size: 10px;
+    font-family: 'Courier New', monospace;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  /* ── spinner ── */
+  .spinner {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(13,15,20,.75);
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: .08em;
+  }
+  .spinner.active { display: flex; }
+  .spin-ring {
+    width: 36px; height: 36px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⬡ CitTree</h1>
+  <div class="controls">
+    <input id="doi-input" type="text"
+      placeholder="DOI or URL — e.g. 10.1038/s41586-020-2649-2 or https://doi.org/..." />
+    <div class="ctrl-group">
+      Depth
+      <input id="depth-slider" type="range" min="1" max="4" value="2" />
+      <span class="ctrl-val" id="depth-val">2</span>
+    </div>
+    <div class="ctrl-group">
+      Refs/node
+      <input id="refs-slider" type="range" min="5" max="30" value="15" step="5" />
+      <span class="ctrl-val" id="refs-val">15</span>
+    </div>
+    <button id="search-btn">BUILD TREE</button>
+  </div>
+</header>
+
+<div class="main">
+  <div id="tree-pane">
+    <svg id="tree-svg"></svg>
+    <div class="spinner" id="spinner">
+      <div class="spin-ring"></div>
+      <span id="spinner-msg">Fetching citations…</span>
+    </div>
+  </div>
+
+  <div id="rank-panel">
+    <div class="panel-header">
+      Importance Ranking
+      <span id="rank-count">—</span>
+    </div>
+    <div id="rank-list"></div>
+  </div>
+</div>
+
+<div id="status">
+  <span id="status-msg">Enter a DOI or URL to get started.</span>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const $ = id => document.getElementById(id);
+
+const depthSlider = $('depth-slider');
+const refsSlider  = $('refs-slider');
+depthSlider.oninput = () => $('depth-val').textContent = depthSlider.value;
+refsSlider.oninput  = () => $('refs-val').textContent  = refsSlider.value;
+
+function setStatus(msg, cls = '') {
+  const el = $('status-msg');
+  el.textContent = msg;
+  el.className = cls;
+}
+
+function showSpinner(msg = 'Fetching citations…') {
+  $('spinner').classList.add('active');
+  $('spinner-msg').textContent = msg;
+}
+function hideSpinner() {
+  $('spinner').classList.remove('active');
+}
+
+// ── API calls ────────────────────────────────────────────────────────────────
+
+async function fetchTree(identifier, maxDepth, maxRefs) {
+  const res = await fetch('/api/tree', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier, max_depth: maxDepth, max_refs_per_node: maxRefs })
+  });
+  return res.json();
+}
+
+// ── D3 Tree ──────────────────────────────────────────────────────────────────
+
+let svgEl, gRoot, zoomBehavior;
+
+function initSvg() {
+  svgEl = d3.select('#tree-svg');
+  svgEl.selectAll('*').remove();
+
+  const w = svgEl.node().clientWidth;
+  const h = svgEl.node().clientHeight;
+
+  zoomBehavior = d3.zoom().scaleExtent([0.1, 3]).on('zoom', e => {
+    gRoot.attr('transform', e.transform);
+  });
+
+  svgEl.call(zoomBehavior);
+  gRoot = svgEl.append('g');
+  return { w, h };
+}
+
+function depthColor(d) {
+  const colors = ['#4f8ef7', '#a78bfa', '#34d399', '#f0b429', '#f87171'];
+  return colors[Math.min(d.depth, colors.length - 1)];
+}
+
+function nodeRadius(d) {
+  const base = 6;
+  const boost = Math.min((d.data.paper.citation_count || 0) / 5000, 1) * 6;
+  return base + boost;
+}
+
+function renderTree(treeData, rankedData) {
+  const { w, h } = initSvg();
+
+  const root = d3.hierarchy(treeData, d => d.children);
+
+  // Dynamic height: guarantee enough vertical space per leaf so nothing overlaps.
+  const leafCount  = root.leaves().length;
+  const ROW_HEIGHT = 22;
+  const treeH      = Math.max(h, leafCount * ROW_HEIGHT);
+
+  // Horizontal spread: give each depth level 220px so labels have room.
+  const depthCount = root.height + 1;
+  const treeW      = depthCount * 220;
+
+  const treeLayout = d3.tree()
+    .size([treeH, treeW])
+    .separation((a, b) => {
+      // Scale separation by sibling count so dense clusters spread out.
+      const aSiblings = a.parent ? a.parent.children.length : 1;
+      const bSiblings = b.parent ? b.parent.children.length : 1;
+      const maxSib    = Math.max(aSiblings, bSiblings);
+      if (a.parent === b.parent) {
+        return 1 + Math.sqrt(maxSib) * 0.15;
+      }
+      return 1.5 + Math.sqrt(maxSib) * 0.2;
+    });
+
+  treeLayout(root);
+
+  const MARGIN_LEFT = 60;
+
+  // Links
+  gRoot.append('g').attr('class', 'links')
+    .selectAll('path')
+    .data(root.links())
+    .join('path')
+    .attr('class', 'link')
+    .attr('d', d3.linkHorizontal()
+      .x(d => d.y + MARGIN_LEFT)
+      .y(d => d.x));
+
+  // Nodes
+  const node = gRoot.append('g').attr('class', 'nodes')
+    .selectAll('g')
+    .data(root.descendants())
+    .join('g')
+    .attr('class', 'node')
+    .attr('transform', d => `translate(${d.y + MARGIN_LEFT},${d.x})`);
+
+  node.append('circle')
+    .attr('r', nodeRadius)
+    .attr('fill', d => depthColor(d))
+    .attr('stroke', d => depthColor(d))
+    .attr('fill-opacity', 0.25)
+    .on('mouseover', (event, d) => showTooltip(event, d.data))
+    .on('mousemove', moveTooltip)
+    .on('mouseout',  hideTooltip)
+    .on('click',     (_, d) => highlightRankItem(d.data.id));
+
+  node.append('text')
+    .attr('dx', d => nodeRadius(d) + 4)
+    .attr('dy', '0.32em')
+    .text(d => {
+      const t = d.data.paper.title || d.data.id;
+      return t.length > 32 ? t.slice(0, 30) + '…' : t;
+    });
+
+  // Auto-fit: scale so the full tree fits in view on first render.
+  const scaleY = h / treeH;
+  const scaleX = w / (treeW + MARGIN_LEFT + 240);
+  const scale  = Math.min(scaleY, scaleX, 1);
+  const ty     = (h - treeH * scale) / 2;
+
+  svgEl.call(zoomBehavior.transform,
+    d3.zoomIdentity.translate(20, ty).scale(scale));
+
+  renderRankPanel(rankedData);
+}
+
+// ── Tooltip ──────────────────────────────────────────────────────────────────
+
+const tt = $('tooltip');
+
+function showTooltip(event, nodeData) {
+  const p = nodeData.paper;
+  const authors = (p.authors || []).slice(0, 3).join(', ');
+  tt.innerHTML = `
+    <strong>${p.title || p.doi}</strong>
+    <div class="tt-meta">${authors}${p.year ? ` · ${p.year}` : ''}</div>
+    <div class="tt-meta">Cited by ${p.citation_count?.toLocaleString() ?? '?'} papers · Source: ${p.source}</div>
+    ${p.abstract ? `<div style="margin-top:6px;color:#94a3b8">${p.abstract.slice(0,160)}…</div>` : ''}
+  `;
+  tt.style.display = 'block';
+  moveTooltip(event);
+}
+
+function moveTooltip(event) {
+  tt.style.left = (event.clientX + 14) + 'px';
+  tt.style.top  = (event.clientY - 10) + 'px';
+}
+
+function hideTooltip() { tt.style.display = 'none'; }
+
+// ── Rank Panel ───────────────────────────────────────────────────────────────
+
+function renderRankPanel(ranked) {
+  $('rank-count').textContent = ranked.length;
+  const list = $('rank-list');
+  list.innerHTML = '';
+
+  const topScore = ranked[0]?.importance_score || 1;
+
+  ranked.forEach((item, i) => {
+    const div = document.createElement('div');
+    div.className = 'rank-item';
+    div.dataset.doi = item.doi;
+
+    const pct = Math.round((item.importance_score / topScore) * 100);
+    const authors = (item.authors || []).slice(0, 2).join(', ');
+    const freq    = item.frequency;
+
+    div.innerHTML = `
+      <div class="rank-top">
+        <span class="rank-num">${i + 1}</span>
+        <div class="rank-score-bar">
+          <div class="rank-score-fill" style="width:${pct}%"></div>
+        </div>
+        <span class="rank-score-val">${item.importance_score.toFixed(3)}</span>
+      </div>
+      <div class="rank-title" title="${item.title}">${item.title || item.doi}</div>
+      <div class="rank-meta">${authors}${item.year ? ` · ${item.year}` : ''} · ×${freq} · ${item.citation_count?.toLocaleString() ?? 0} cites</div>
+    `;
+
+    div.addEventListener('click', () => {
+      if (item.url) window.open(item.url, '_blank');
+    });
+
+    list.appendChild(div);
+  });
+}
+
+function highlightRankItem(doi) {
+  document.querySelectorAll('.rank-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.doi === doi);
+  });
+  const active = document.querySelector('.rank-item.active');
+  if (active) active.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── Search ───────────────────────────────────────────────────────────────────
+
+$('search-btn').addEventListener('click', async () => {
+  const identifier = $('doi-input').value.trim();
+  if (!identifier) return;
+
+  const maxDepth = parseInt(depthSlider.value);
+  const maxRefs  = parseInt(refsSlider.value);
+
+  $('search-btn').disabled = true;
+  showSpinner(`Building depth-${maxDepth} tree…`);
+  setStatus(`Resolving "${identifier}"…`, 's-info');
+
+  try {
+    const data = await fetchTree(identifier, maxDepth, maxRefs);
+
+    if (data.error) {
+      setStatus('Error: ' + data.error, 's-err');
+      hideSpinner();
+      $('search-btn').disabled = false;
+      return;
+    }
+
+    renderTree(data.tree, data.ranked);
+
+    const s = data.stats;
+    setStatus(
+      `"${s.root_title}" · ${s.total_unique} unique papers · depth ${s.max_depth}`,
+      's-ok'
+    );
+  } catch (err) {
+    setStatus('Network error: ' + err.message, 's-err');
+  } finally {
+    hideSpinner();
+    $('search-btn').disabled = false;
+  }
+});
+
+$('doi-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('search-btn').click();
+});
+</script>
+</body>
+</html>
