@@ -174,10 +174,15 @@ def build_tree(identifier: str, source: TreeSource,
     freq: dict[str, int] = defaultdict(int)
     registry: dict[str, Paper] = {}
     visited: set[str] = set()
+    min_depths: dict[str, int] = {} 
 
     def recurse(paper: Paper, depth: int) -> dict:
         freq[paper.doi] += 1
         registry[paper.doi] = paper
+        
+        if paper.doi not in min_depths or depth < min_depths[paper.doi]:
+            min_depths[paper.doi] = depth
+
         node = {
             "id": paper.doi,
             "paper": paper.to_dict(),
@@ -197,16 +202,31 @@ def build_tree(identifier: str, source: TreeSource,
     max_cit  = max((p.citation_count for p in registry.values()), default=1) or 1
 
     ranked = []
+    DECAY_FACTOR = 0.9  # 1.0 = no decay, 0.9 = 10% penalty per depth level
+
     for doi_key, paper in registry.items():
-        score = (
-            (freq[doi_key] / max_freq) * 0.4 +
-            (min(paper.citation_count, max_cit) / max_cit) * 0.4 +
-            (0.2 if doi_key == root_paper.doi else 0.0)
-        )
+        # Basic Scores (0.0 to 1.0)
+        f_score = freq[doi_key] / max_freq
+        c_score = min(paper.citation_count, max_cit) / max_cit
+        
+        # Calculate Depth Penalty
+        # Root (depth 0) = 0.9^0 = 1.0 (No penalty)
+        # Depth 1 = 0.9^1 = 0.9
+        # Depth 2 = 0.9^2 = 0.81
+        depth = min_depths.get(doi_key, 0)
+        penalty = DECAY_FACTOR ** depth
+
+        # Combine with weights
+        base_score = (f_score * 0.4) + (c_score * 0.4)
+        
+        # Apply penalty and add identity bonus for the root
+        final_score = (base_score * penalty)
+
         ranked.append({
             **paper.to_dict(),
             "frequency": freq[doi_key],
-            "importance_score": round(score, 4),
+            "importance_score": round(final_score, 4),
+            "found_at_depth": depth # Useful for debugging in the UI
         })
     ranked.sort(key=lambda x: x["importance_score"], reverse=True)
 
