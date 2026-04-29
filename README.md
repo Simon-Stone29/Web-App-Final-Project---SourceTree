@@ -1,5 +1,5 @@
 File structure: 
-citation-tree/
+citation-tree/\n
 ├── app.py
 ├── requirements.txt
 └── static/
