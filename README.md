@@ -1,9 +1,9 @@
 File structure: 
-citation-tree/\n
-├── app.py
-├── requirements.txt
-└── static/
-    └── index.html
+citation-tree/
+- app.py
+- requirements.txt
+- static/
+    - index.html
 
 Run steps:
 py -m pip install -r requirements.txt
