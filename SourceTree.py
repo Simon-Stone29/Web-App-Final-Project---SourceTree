@@ -217,7 +217,7 @@ def build_tree(identifier: str, source: TreeSource,
         penalty = DECAY_FACTOR ** depth
 
         # Combine with weights
-        base_score = (f_score * 0.4) + (c_score * 0.4)
+        base_score = (f_score * 0.5) + (c_score * 0.5)
         
         # Apply penalty and add identity bonus for the root
         final_score = (base_score * penalty)
